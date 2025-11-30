@@ -267,17 +267,15 @@ const App: React.FC = () => {
   }, []);
 
   const handleRestart = () => {
-    // Confirm before quitting if in the middle of a quiz. 
-    // Skip confirmation if:
-    // 1. currently loading (user aborting generation)
-    // 2. already finished
-    // 3. currently on the FIRST question (acts as simple back button)
-    const isFirstQuestion = quizState.currentQuestionIndex === 0;
-
-    if (screen === 'QUIZ' && !quizState.isFinished && !quizState.isLoading && !isFirstQuestion) {
-      if (!window.confirm('คุณต้องการยกเลิกการสอบใช่หรือไม่? ข้อมูลการสอบปัจจุบันจะหายไป')) {
-        return;
-      }
+    // Check if we are in an active quiz or loading state
+    if (screen === 'QUIZ' && !quizState.isFinished) {
+        const message = quizState.isLoading 
+          ? 'คุณต้องการยกเลิกการสร้างข้อสอบใช่หรือไม่?'
+          : 'คุณต้องการยกเลิกการสอบใช่หรือไม่? ข้อมูลการสอบปัจจุบันจะหายไป';
+          
+        if (!window.confirm(message)) {
+            return;
+        }
     }
 
     setScreen('MENU');
