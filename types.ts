@@ -14,18 +14,21 @@ export interface Question {
   correctAnswerIndex: number;
   explanation: string;
   category: Subject; // Track which category this question belongs to
+  svg?: string; // Optional SVG code for images/graphs
 }
 
 export interface QuizState {
   questions: Question[];
   currentQuestionIndex: number;
   userAnswers: Record<number, number>; // questionIndex -> choiceIndex
+  pinnedIndices: number[]; // Indices of pinned questions
   score: number;
   isFinished: boolean;
   isLoading: boolean;
   error: string | null;
   mode: 'PRACTICE' | 'FULL_EXAM' | 'CHALLENGE';
   timeLeft: number; // Remaining time in seconds
+  isReviewing: boolean; // Whether the user is on the review screen
 }
 
 export interface ScoreRecord {

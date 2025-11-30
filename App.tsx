@@ -14,12 +14,14 @@ const App: React.FC = () => {
     questions: [],
     currentQuestionIndex: 0,
     userAnswers: {},
+    pinnedIndices: [],
     score: 0,
     isFinished: false,
     isLoading: false,
     error: null,
     mode: 'PRACTICE',
-    timeLeft: 0
+    timeLeft: 0,
+    isReviewing: false
   });
 
   const [showCurrentResult, setShowCurrentResult] = useState(false);
@@ -83,13 +85,6 @@ const App: React.FC = () => {
                       }
                     });
                     
-                    // Save Score (Pass subject from closure or prev state logic if stored)
-                    // We need to access the 'subject' state variable here.
-                    // Ideally, we shouldn't rely on closure for 'subject' inside functional update if it changes, 
-                    // but 'subject' doesn't change during the quiz.
-                    
-                    // Note: We need to perform side effect (save) here or trigger it.
-                    // Doing it here ensures it captures the exact moment of timeout.
                     saveScoreData(score, prev.questions.length, prev.questions, prev.userAnswers, prev.mode, subject!);
 
                     return {
@@ -105,7 +100,6 @@ const App: React.FC = () => {
     }
     return () => clearInterval(timer);
   }, [quizState.mode, quizState.isFinished, quizState.isLoading, screen, subject]); 
-  // Added 'subject' to dependency to ensure saveScoreData has correct closure if needed, though mostly static during quiz.
 
   // --- Handlers ---
 
@@ -124,7 +118,9 @@ const App: React.FC = () => {
       isLoading: true, 
       error: null,
       mode: mode,
-      timeLeft: initialTime
+      timeLeft: initialTime,
+      isReviewing: false,
+      pinnedIndices: []
     }));
     
     setScreen('QUIZ');
@@ -141,12 +137,14 @@ const App: React.FC = () => {
         questions,
         currentQuestionIndex: 0,
         userAnswers: {},
+        pinnedIndices: [],
         score: 0,
         isFinished: false,
         isLoading: false,
         error: null,
         mode: mode,
-        timeLeft: initialTime
+        timeLeft: initialTime,
+        isReviewing: false
       });
       setShowCurrentResult(false);
     } catch (error) {
@@ -172,12 +170,30 @@ const App: React.FC = () => {
     }
   }, [quizState.mode]);
 
-  const handleNextQuestion = useCallback(() => {
+  const handleTogglePin = useCallback(() => {
     setQuizState(prev => {
-      const isLastQuestion = prev.currentQuestionIndex === prev.questions.length - 1;
-      
-      if (isLastQuestion) {
-        // Calculate final score
+      const currentIndex = prev.currentQuestionIndex;
+      const isPinned = prev.pinnedIndices.includes(currentIndex);
+      return {
+        ...prev,
+        pinnedIndices: isPinned 
+          ? prev.pinnedIndices.filter(i => i !== currentIndex)
+          : [...prev.pinnedIndices, currentIndex]
+      };
+    });
+  }, []);
+
+  const handleJumpToQuestion = (index: number) => {
+    setQuizState(prev => ({
+      ...prev,
+      currentQuestionIndex: index,
+      isReviewing: false
+    }));
+    setShowCurrentResult(false); // Reset result view if moving around in Practice (though practice usually reveals instantly)
+  };
+
+  const submitExam = useCallback(() => {
+    setQuizState(prev => {
         let score = 0;
         prev.questions.forEach((q, idx) => {
           if (prev.userAnswers[idx] === q.correctAnswerIndex) {
@@ -191,6 +207,31 @@ const App: React.FC = () => {
           ...prev,
           score,
           isFinished: true,
+          isReviewing: false
+        };
+    });
+    setScreen('RESULT');
+  }, [subject]);
+
+  const handleNextQuestion = useCallback(() => {
+    setQuizState(prev => {
+      const isLastQuestion = prev.currentQuestionIndex === prev.questions.length - 1;
+      
+      if (isLastQuestion) {
+        // If Practice Mode, just finish.
+        if (prev.mode === 'PRACTICE') {
+             // For practice, we can just finish immediately as usual
+             // But to be consistent with user request "When last question, show review", let's apply review for all modes or just Exam?
+             // User said "Make it 100 questions... Show review at the end". Usually for Practice (5 items) it's annoying.
+             // Let's enable review only if items > 5 or specific request. 
+             // But the request implies the pin/skip feature is general. Let's do it for all.
+             return { ...prev, isReviewing: true };
+        }
+
+        // For Full Exam / Challenge, show review screen before submitting
+        return {
+          ...prev,
+          isReviewing: true,
         };
       }
 
@@ -200,23 +241,12 @@ const App: React.FC = () => {
       };
     });
     
-    // Transition
-    // In Full Exam / Challenge, we don't show result per question, so we always just go next.
-    // In Practice, we waited for user to see result.
     if (quizState.mode === 'PRACTICE') {
        if (quizState.currentQuestionIndex < quizState.questions.length - 1) {
           setShowCurrentResult(false);
-       } else {
-          setScreen('RESULT');
        }
-    } else {
-       // Full Exam / Challenge: Move to result screen only if finished
-       const isLast = quizState.currentQuestionIndex === quizState.questions.length - 1;
-       if (isLast) {
-          setScreen('RESULT');
-       }
-    }
-  }, [quizState.questions, quizState.currentQuestionIndex, quizState.userAnswers, quizState.mode, subject]);
+    } 
+  }, [quizState.questions, quizState.currentQuestionIndex, quizState.mode]);
 
   const handleRestart = () => {
     setScreen('MENU');
@@ -225,12 +255,14 @@ const App: React.FC = () => {
         questions: [],
         currentQuestionIndex: 0,
         userAnswers: {},
+        pinnedIndices: [],
         score: 0,
         isFinished: false,
         isLoading: false,
         error: null,
         mode: 'PRACTICE',
-        timeLeft: 0
+        timeLeft: 0,
+        isReviewing: false
     });
   };
 
@@ -275,7 +307,7 @@ const App: React.FC = () => {
                  <h2 className="text-2xl font-bold">จำลองการสอบจริง</h2>
               </div>
               <p className="text-purple-100 text-sm mb-4">
-                100 ข้อ (คิดวิเคราะห์, อังกฤษ, กฎหมาย) ไม่จำกัดเวลา เน้นการทำความเข้าใจ
+              (คิดวิเคราะห์, อังกฤษ, กฎหมาย) ไม่จำกัดเวลา เน้นการทำความเข้าใจ
               </p>
               <div className="flex items-center text-xs font-semibold bg-white/10 w-fit px-3 py-1 rounded-full">
                  <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" /></svg>
@@ -340,6 +372,59 @@ const App: React.FC = () => {
     </div>
   );
 
+  const renderReviewScreen = () => {
+    return (
+      <div className="min-h-screen bg-slate-50 flex flex-col items-center py-8 px-4">
+         <div className="max-w-4xl w-full bg-white rounded-2xl shadow-xl p-8">
+            <h2 className="text-2xl font-bold text-gray-800 mb-6 text-center">ตรวจสอบคำตอบ (Review)</h2>
+            
+            <div className="flex flex-wrap justify-center gap-4 mb-8 text-sm">
+                <div className="flex items-center gap-2"><span className="w-4 h-4 bg-primary-500 rounded-sm"></span> ทำแล้ว</div>
+                <div className="flex items-center gap-2"><span className="w-4 h-4 bg-yellow-400 rounded-sm"></span> ปักหมุด</div>
+                <div className="flex items-center gap-2"><span className="w-4 h-4 bg-gray-200 rounded-sm"></span> ยังไม่ทำ</div>
+            </div>
+
+            <div className="grid grid-cols-5 sm:grid-cols-8 md:grid-cols-10 gap-3 mb-10">
+                {quizState.questions.map((_, index) => {
+                    const isAnswered = quizState.userAnswers[index] !== undefined;
+                    const isPinned = quizState.pinnedIndices.includes(index);
+                    
+                    let bgClass = 'bg-gray-100 text-gray-500 hover:bg-gray-200';
+                    if (isPinned) bgClass = 'bg-yellow-100 text-yellow-700 border-2 border-yellow-400 hover:bg-yellow-200';
+                    else if (isAnswered) bgClass = 'bg-primary-50 text-primary-700 border border-primary-200 hover:bg-primary-100';
+
+                    return (
+                        <button 
+                            key={index}
+                            onClick={() => handleJumpToQuestion(index)}
+                            className={`aspect-square rounded-lg font-bold text-sm flex items-center justify-center transition-all ${bgClass}`}
+                        >
+                            {index + 1}
+                            {isPinned && <span className="absolute -top-1 -right-1 w-2 h-2 bg-red-500 rounded-full"></span>}
+                        </button>
+                    )
+                })}
+            </div>
+
+            <div className="flex justify-center gap-4">
+                <button 
+                    onClick={() => handleJumpToQuestion(quizState.currentQuestionIndex)}
+                    className="px-6 py-3 border border-gray-300 rounded-lg text-gray-700 font-medium hover:bg-gray-50"
+                >
+                    กลับไปทำต่อ
+                </button>
+                <button 
+                    onClick={submitExam}
+                    className="px-8 py-3 bg-green-600 text-white rounded-lg font-bold shadow-lg hover:bg-green-700 hover:shadow-xl transition-all"
+                >
+                    ยืนยันส่งคำตอบ
+                </button>
+            </div>
+         </div>
+      </div>
+    );
+  };
+
   const renderQuiz = () => {
     if (quizState.isLoading) {
       return (
@@ -358,19 +443,17 @@ const App: React.FC = () => {
       );
     }
 
+    // Check if showing review screen
+    if (quizState.isReviewing) {
+        return renderReviewScreen();
+    }
+
     const currentQ = quizState.questions[quizState.currentQuestionIndex];
     const isLastQ = quizState.currentQuestionIndex === quizState.questions.length - 1;
 
-    // Check if user is done (either finished via timer or manual finish which sets screen to result)
+    // Check if user is done (either finished via timer or manual finish)
     if (quizState.isFinished && screen === 'QUIZ') {
-         // This can happen if timer finishes while user is on quiz screen
-         // We should render result, but handleNextQuestion logic normally transitions screen.
-         // If timer triggered finish, we need to manually show result content or force transition in effect.
-         // For simplicity, let's render a "Times Up" message or force redirect.
-         // The useEffect above sets isFinished but doesn't change screen to RESULT directly to avoid render loops.
-         // Let's change screen here? No, render shouldn't cause side effects.
-         // Better: The useEffect should probably setScreen('RESULT') too? 
-         // Or we just display "Time's Up" overlay here.
+         // Force transition if stuck
          return (
              <div className="min-h-screen flex items-center justify-center bg-red-50">
                  <div className="text-center p-8">
@@ -414,31 +497,43 @@ const App: React.FC = () => {
           totalQuestions={quizState.questions.length}
           onAnswer={handleAnswer}
           selectedChoice={quizState.userAnswers[quizState.currentQuestionIndex]}
-          showResult={showCurrentResult || quizState.mode !== 'PRACTICE'} // In Exam/Challenge, we show selection state but NOT correctness (unless we want to hide even selection?) Usually we show selection.
-          // Correction: In Exam/Challenge, we don't show result (Green/Red) immediately.
-          // QuizCard logic for "showResult" triggers the Green/Red styling.
-          // For Exam/Challenge, "showResult" should be false until the very end.
-          // However, QuizCard uses "showResult" to disable buttons too.
-          // We need to pass "showResult={false}" for Exam modes during the test.
+          showResult={showCurrentResult}
+          isPinned={quizState.pinnedIndices.includes(quizState.currentQuestionIndex)}
+          onTogglePin={handleTogglePin}
         />
-        {/* Override showResult prop logic for QuizCard in App context:
-            In PRACTICE: showCurrentResult becomes true after answer.
-            In EXAM/CHALLENGE: showCurrentResult stays false until end (handled by separate screen).
-            Wait, QuizCard highlights the selected answer if !showResult and selectedChoice is set (blue border).
-            So passing showResult={false} works for Exam mode navigation.
-        */}
 
-        <div className="w-full max-w-3xl mt-6 flex justify-end">
-             {/* Next Button Logic */}
-             {(quizState.mode !== 'PRACTICE' || showCurrentResult) && (
-                <button
-                  onClick={handleNextQuestion}
-                  className="bg-primary-600 hover:bg-primary-700 text-white font-bold py-3 px-8 rounded-lg shadow-lg hover:shadow-xl transition-all transform hover:-translate-y-1 flex items-center gap-2"
-                >
-                  {isLastQ ? 'ส่งคำตอบ' : 'ข้อต่อไป'}
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" /></svg>
-                </button>
-             )}
+        <div className="w-full max-w-3xl mt-6 flex justify-between items-center">
+             <div className="text-sm text-gray-400">
+                {quizState.pinnedIndices.length > 0 && (
+                    <span className="text-yellow-600 flex items-center gap-1">
+                        <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path d="M5 4a2 2 0 012-2h6a2 2 0 012 2v14l-5-2.5L5 18V4z"/></svg>
+                        ปักหมุด {quizState.pinnedIndices.length} ข้อ
+                    </span>
+                )}
+             </div>
+
+             {/* Navigation */}
+             <div className="flex gap-3">
+                 {/* Show Review Button if not in Practice or if we want to allow jumping */}
+                 {quizState.mode !== 'PRACTICE' && (
+                    <button 
+                        onClick={() => setQuizState(prev => ({...prev, isReviewing: true}))}
+                        className="px-4 py-3 text-gray-600 hover:text-primary-600 font-medium text-sm"
+                    >
+                        ดูภาพรวม
+                    </button>
+                 )}
+
+                 {(quizState.mode !== 'PRACTICE' || showCurrentResult) && (
+                    <button
+                    onClick={handleNextQuestion}
+                    className="bg-primary-600 hover:bg-primary-700 text-white font-bold py-3 px-8 rounded-lg shadow-lg hover:shadow-xl transition-all transform hover:-translate-y-1 flex items-center gap-2"
+                    >
+                    {isLastQ ? 'ตรวจสอบและส่ง' : 'ข้อต่อไป'}
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" /></svg>
+                    </button>
+                 )}
+             </div>
         </div>
       </div>
     );

@@ -8,6 +8,8 @@ interface QuizCardProps {
   onAnswer: (choiceIndex: number) => void;
   selectedChoice: number | undefined;
   showResult: boolean;
+  isPinned: boolean;
+  onTogglePin: () => void;
 }
 
 const QuizCard: React.FC<QuizCardProps> = ({
@@ -17,6 +19,8 @@ const QuizCard: React.FC<QuizCardProps> = ({
   onAnswer,
   selectedChoice,
   showResult,
+  isPinned,
+  onTogglePin
 }) => {
   const [showExplanation, setShowExplanation] = useState(false);
 
@@ -46,22 +50,40 @@ const QuizCard: React.FC<QuizCardProps> = ({
   };
 
   return (
-    <div className="w-full max-w-3xl mx-auto bg-white rounded-2xl shadow-xl overflow-hidden border border-gray-100">
+    <div className="w-full max-w-3xl mx-auto bg-white rounded-2xl shadow-xl overflow-hidden border border-gray-100 relative">
       {/* Header / Progress */}
       <div className="bg-gray-50 px-6 py-4 border-b border-gray-100 flex justify-between items-center">
         <span className="text-sm font-semibold text-gray-500 uppercase tracking-wider">
           คำถามที่ {questionNumber} / {totalQuestions}
         </span>
-        <div className="flex gap-1">
-           {/* Simple Progress dots could go here */}
-        </div>
+        
+        {/* Pin Button */}
+        <button 
+          onClick={onTogglePin}
+          className={`flex items-center gap-1 px-3 py-1 rounded-full text-sm font-medium transition-colors ${isPinned ? 'bg-yellow-100 text-yellow-700' : 'text-gray-400 hover:bg-gray-100 hover:text-gray-600'}`}
+        >
+           <svg className={`w-5 h-5 ${isPinned ? 'fill-yellow-500' : 'fill-none'}`} stroke="currentColor" viewBox="0 0 24 24">
+             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
+           </svg>
+           {isPinned ? 'ปักหมุดแล้ว' : 'ปักหมุด'}
+        </button>
       </div>
 
       <div className="p-6 md:p-8">
         {/* Question Text */}
-        <h2 className="text-xl md:text-2xl font-bold text-gray-800 mb-8 leading-relaxed">
+        <h2 className="text-xl md:text-2xl font-bold text-gray-800 mb-6 leading-relaxed">
           {question.text}
         </h2>
+
+        {/* SVG Image (if present) */}
+        {question.svg && (
+          <div className="mb-8 flex justify-center">
+            <div 
+              className="bg-white border border-gray-200 rounded-lg p-4 shadow-inner"
+              dangerouslySetInnerHTML={{ __html: question.svg }} 
+            />
+          </div>
+        )}
 
         {/* Choices */}
         <div className="space-y-2">

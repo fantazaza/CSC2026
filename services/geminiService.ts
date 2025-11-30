@@ -27,6 +27,10 @@ const questionSchema: Schema = {
             type: Type.STRING,
             description: "A detailed explanation in Thai of why the answer is correct.",
           },
+          svg: {
+            type: Type.STRING,
+            description: "Optional: SVG xml string (starting with <svg) for geometry, graphs, or visual logic. Max size 300x300. Return null if not needed.",
+          },
         },
         required: ["text", "choices", "correctAnswerIndex", "explanation"],
       },
@@ -40,7 +44,7 @@ const getSubjectGuidelines = (subject: Subject): string => {
     case Subject.GENERAL:
       return `Include a mix of:
       1. Number Series (อนุกรม) - complex patterns.
-      2. General Math (คณิตศาสตร์ทั่วไป) - percentage, ratio, probability, equation.
+      2. General Math (คณิตศาสตร์ทั่วไป) - percentage, ratio, probability, equation. *Important: If a question involves Geometry (shapes) or Data Analysis (Charts/Graphs), YOU MUST PROVIDE THE 'svg' FIELD with valid SVG code to visualize it.*
       3. Logical Reasoning (เงื่อนไขสัญลักษณ์/เงื่อนไขภาษา) - ensure logic is strictly valid.
       4. Data Analysis (ตารางข้อมูล) - simple interpretation.`;
     case Subject.THAI:
@@ -76,11 +80,9 @@ export const generateQuizQuestions = async (subject: Subject, count: number = 5)
 
     const ai = new GoogleGenAI({ apiKey });
     
-    // For large counts, we simplify the prompt slightly to ensure JSON integrity, 
-    // but keep thinkingConfig for quality.
     const prompt = `
       You are an expert tutor for the Thailand OCSC (Gor Por) Exam (Year 2569).
-      Create ${count} multiple-choice questions for the subject: "${subject}".
+      Create EXACTLY ${count} multiple-choice questions for the subject: "${subject}".
       
       Target Audience: University graduates taking the government service entrance exam.
       Language: Thai (Strictly).
@@ -93,6 +95,7 @@ export const generateQuizQuestions = async (subject: Subject, count: number = 5)
       1. Questions must be realistic and match the official OCSC exam difficulty.
       2. Choices must be plausible (distractors should be tricky).
       3. Explanation must be detailed and educational.
+      4. If the question requires a visual aid (especially Math/Logic), provide a clean, simple SVG string in the 'svg' field.
     `;
 
     const response = await ai.models.generateContent({
@@ -101,7 +104,7 @@ export const generateQuizQuestions = async (subject: Subject, count: number = 5)
       config: {
         responseMimeType: "application/json",
         responseSchema: questionSchema,
-        thinkingConfig: { thinkingBudget: 2048 }, // Adjusted budget for latency balance
+        thinkingConfig: { thinkingBudget: 2048 },
       },
     });
 
@@ -113,18 +116,25 @@ export const generateQuizQuestions = async (subject: Subject, count: number = 5)
     const parsedData = JSON.parse(jsonText);
     
     // Transform to our internal type and add IDs
-    return parsedData.questions.map((q: any, index: number) => ({
+    let questions = parsedData.questions.map((q: any, index: number) => ({
       id: `q-${Date.now()}-${subject}-${index}`,
       text: q.text,
       choices: q.choices,
       correctAnswerIndex: q.correctAnswerIndex,
       explanation: q.explanation,
-      category: subject
+      category: subject,
+      svg: q.svg || undefined
     }));
+
+    // Enforce strict count limit
+    if (questions.length > count) {
+      questions = questions.slice(0, count);
+    }
+
+    return questions;
 
   } catch (error) {
     console.error(`Error generating quiz for ${subject}:`, error);
-    // Fallback: return empty array or throw. Throwing allows retry logic in UI.
     throw error;
   }
 };
@@ -146,9 +156,6 @@ export const generateFullExam = async (): Promise<Question[]> => {
     ]);
 
     // Combine all questions
-    // We map the category of Math and Thai to match the "Analytical" concept if needed,
-    // but keeping their original subject allows for better breakdown stats.
-    
     return [
       ...mathQuestions,
       ...thaiQuestions,
