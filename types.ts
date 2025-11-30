@@ -3,7 +3,8 @@ export enum Subject {
   THAI = 'ภาษาไทย',
   ENGLISH = 'ภาษาอังกฤษ',
   LAW = 'ความรู้และลักษณะการเป็นข้าราชการที่ดี',
-  FULL_MOCK = 'จำลองการสอบจริง (100 ข้อ)'
+  FULL_MOCK = 'จำลองการสอบจริง (100 ข้อ)',
+  CHALLENGE = 'Challenge Mode (3 ชั่วโมง)'
 }
 
 export interface Question {
@@ -23,13 +24,14 @@ export interface QuizState {
   isFinished: boolean;
   isLoading: boolean;
   error: string | null;
-  mode: 'PRACTICE' | 'FULL_EXAM';
+  mode: 'PRACTICE' | 'FULL_EXAM' | 'CHALLENGE';
+  timeLeft: number; // Remaining time in seconds
 }
 
 export interface ScoreRecord {
   id: string;
   date: string;
-  mode: 'PRACTICE' | 'FULL_EXAM';
+  mode: 'PRACTICE' | 'FULL_EXAM' | 'CHALLENGE';
   subject: Subject;
   score: number;
   total: number;

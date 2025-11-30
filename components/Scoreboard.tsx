@@ -37,6 +37,16 @@ const Scoreboard: React.FC<ScoreboardProps> = ({ onBack }) => {
     return new Date(dateString).toLocaleDateString('th-TH', options);
   };
 
+  const getModeBadge = (mode: string) => {
+    if (mode === 'CHALLENGE') {
+        return <span className="px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wide bg-red-100 text-red-700">Challenge</span>;
+    }
+    if (mode === 'FULL_EXAM') {
+        return <span className="px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wide bg-purple-100 text-purple-700">จำลองสอบจริง</span>;
+    }
+    return <span className="px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wide bg-blue-100 text-blue-700">ฝึกฝน</span>;
+  };
+
   return (
     <div className="max-w-4xl mx-auto px-4 py-8">
       <div className="flex justify-between items-center mb-8">
@@ -69,14 +79,11 @@ const Scoreboard: React.FC<ScoreboardProps> = ({ onBack }) => {
               <div className="flex flex-col md:flex-row justify-between md:items-center gap-4">
                 <div>
                   <div className="flex items-center gap-3 mb-2">
-                    <span className={`px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wide 
-                      ${record.mode === 'FULL_EXAM' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}>
-                      {record.mode === 'FULL_EXAM' ? 'จำลองสอบจริง' : 'ฝึกฝน'}
-                    </span>
+                    {getModeBadge(record.mode)}
                     <span className="text-gray-500 text-sm">{formatDate(record.date)}</span>
                   </div>
                   <h3 className="font-bold text-lg text-gray-800">
-                    {record.subject === Subject.FULL_MOCK ? 'สอบครบทุกวิชา (100 ข้อ)' : record.subject}
+                    {record.subject === Subject.FULL_MOCK || record.subject === Subject.CHALLENGE ? 'สอบครบทุกวิชา (100 ข้อ)' : record.subject}
                   </h3>
                 </div>
 

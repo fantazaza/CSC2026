@@ -5,6 +5,7 @@ import SubjectCard from './components/SubjectCard';
 import QuizCard from './components/QuizCard';
 import LoadingSpinner from './components/LoadingSpinner';
 import Scoreboard from './components/Scoreboard';
+import Timer from './components/Timer';
 
 const App: React.FC = () => {
   const [screen, setScreen] = useState<GameScreen>('MENU');
@@ -17,22 +18,23 @@ const App: React.FC = () => {
     isFinished: false,
     isLoading: false,
     error: null,
-    mode: 'PRACTICE'
+    mode: 'PRACTICE',
+    timeLeft: 0
   });
 
   const [showCurrentResult, setShowCurrentResult] = useState(false);
 
-  // Save score to local storage
-  const saveScore = (finalScore: number, totalQuestions: number, questions: any[], userAnswers: any) => {
+  // Helper to save score
+  const saveScoreData = (finalScore: number, totalQuestions: number, questions: any[], userAnswers: any, currentMode: 'PRACTICE' | 'FULL_EXAM' | 'CHALLENGE', currentSubject: Subject) => {
     let details = undefined;
     
-    // Calculate breakdown for Full Exam
-    if (quizState.mode === 'FULL_EXAM') {
+    // Calculate breakdown for Full Exam / Challenge
+    if (currentMode === 'FULL_EXAM' || currentMode === 'CHALLENGE') {
         let analyticalScore = 0;
         let englishScore = 0;
         let lawScore = 0;
 
-        questions.forEach((q, idx) => {
+        questions.forEach((q: any, idx: number) => {
             if (userAnswers[idx] === q.correctAnswerIndex) {
                 if (q.category === Subject.GENERAL || q.category === Subject.THAI) analyticalScore++;
                 else if (q.category === Subject.ENGLISH) englishScore++;
@@ -49,8 +51,8 @@ const App: React.FC = () => {
     const newRecord: ScoreRecord = {
       id: Date.now().toString(),
       date: new Date().toISOString(),
-      mode: quizState.mode,
-      subject: subject || Subject.GENERAL, // Fallback
+      mode: currentMode,
+      subject: currentSubject || Subject.GENERAL, 
       score: finalScore,
       total: totalQuestions,
       details: details
@@ -62,29 +64,77 @@ const App: React.FC = () => {
     localStorage.setItem('gorpor_score_history', JSON.stringify(history));
   };
 
+  // Timer Effect
+  useEffect(() => {
+    let timer: ReturnType<typeof setInterval>;
+    
+    if (quizState.mode === 'CHALLENGE' && !quizState.isFinished && !quizState.isLoading && screen === 'QUIZ') {
+        timer = setInterval(() => {
+            setQuizState(prev => {
+                if (prev.timeLeft <= 0) {
+                    clearInterval(timer);
+                    
+                    // Time Up Logic: Auto submit
+                    // Calculate score based on current answers
+                    let score = 0;
+                    prev.questions.forEach((q, idx) => {
+                      if (prev.userAnswers[idx] === q.correctAnswerIndex) {
+                        score++;
+                      }
+                    });
+                    
+                    // Save Score (Pass subject from closure or prev state logic if stored)
+                    // We need to access the 'subject' state variable here.
+                    // Ideally, we shouldn't rely on closure for 'subject' inside functional update if it changes, 
+                    // but 'subject' doesn't change during the quiz.
+                    
+                    // Note: We need to perform side effect (save) here or trigger it.
+                    // Doing it here ensures it captures the exact moment of timeout.
+                    saveScoreData(score, prev.questions.length, prev.questions, prev.userAnswers, prev.mode, subject!);
+
+                    return {
+                        ...prev,
+                        isFinished: true,
+                        timeLeft: 0,
+                        score: score
+                    };
+                }
+                return { ...prev, timeLeft: prev.timeLeft - 1 };
+            });
+        }, 1000);
+    }
+    return () => clearInterval(timer);
+  }, [quizState.mode, quizState.isFinished, quizState.isLoading, screen, subject]); 
+  // Added 'subject' to dependency to ensure saveScoreData has correct closure if needed, though mostly static during quiz.
+
   // --- Handlers ---
 
   const handleStartQuiz = async (selectedSubject: Subject) => {
     setSubject(selectedSubject);
     
-    // Determine mode
     const isFullExam = selectedSubject === Subject.FULL_MOCK;
+    const isChallenge = selectedSubject === Subject.CHALLENGE;
+    const mode = isChallenge ? 'CHALLENGE' : (isFullExam ? 'FULL_EXAM' : 'PRACTICE');
     
+    // Challenge Mode: 3 Hours = 10800 seconds
+    const initialTime = isChallenge ? 3 * 60 * 60 : 0; 
+
     setQuizState(prev => ({ 
       ...prev, 
       isLoading: true, 
       error: null,
-      mode: isFullExam ? 'FULL_EXAM' : 'PRACTICE'
+      mode: mode,
+      timeLeft: initialTime
     }));
     
     setScreen('QUIZ');
     
     try {
       let questions;
-      if (isFullExam) {
+      if (isFullExam || isChallenge) {
         questions = await generateFullExam();
       } else {
-        questions = await generateQuizQuestions(selectedSubject, 5); // Practice mode keeps 5 questions
+        questions = await generateQuizQuestions(selectedSubject, 5);
       }
 
       setQuizState({
@@ -95,7 +145,8 @@ const App: React.FC = () => {
         isFinished: false,
         isLoading: false,
         error: null,
-        mode: isFullExam ? 'FULL_EXAM' : 'PRACTICE'
+        mode: mode,
+        timeLeft: initialTime
       });
       setShowCurrentResult(false);
     } catch (error) {
@@ -115,8 +166,11 @@ const App: React.FC = () => {
         [prev.currentQuestionIndex]: choiceIndex
       }
     }));
-    setShowCurrentResult(true);
-  }, []);
+    // Only show immediate result in PRACTICE mode
+    if (quizState.mode === 'PRACTICE') {
+      setShowCurrentResult(true);
+    }
+  }, [quizState.mode]);
 
   const handleNextQuestion = useCallback(() => {
     setQuizState(prev => {
@@ -131,8 +185,7 @@ const App: React.FC = () => {
           }
         });
 
-        // Trigger save outside of state update (via effect or direct call? direct call is safer here for data integrity)
-        saveScore(score, prev.questions.length, prev.questions, prev.userAnswers);
+        saveScoreData(score, prev.questions.length, prev.questions, prev.userAnswers, prev.mode, subject!);
         
         return {
           ...prev,
@@ -148,12 +201,22 @@ const App: React.FC = () => {
     });
     
     // Transition
-    if (quizState.currentQuestionIndex < quizState.questions.length - 1) {
-       setShowCurrentResult(false);
+    // In Full Exam / Challenge, we don't show result per question, so we always just go next.
+    // In Practice, we waited for user to see result.
+    if (quizState.mode === 'PRACTICE') {
+       if (quizState.currentQuestionIndex < quizState.questions.length - 1) {
+          setShowCurrentResult(false);
+       } else {
+          setScreen('RESULT');
+       }
     } else {
-       setScreen('RESULT');
+       // Full Exam / Challenge: Move to result screen only if finished
+       const isLast = quizState.currentQuestionIndex === quizState.questions.length - 1;
+       if (isLast) {
+          setScreen('RESULT');
+       }
     }
-  }, [quizState.questions, quizState.currentQuestionIndex, quizState.userAnswers, quizState.mode]); // Added dependencies
+  }, [quizState.questions, quizState.currentQuestionIndex, quizState.userAnswers, quizState.mode, subject]);
 
   const handleRestart = () => {
     setScreen('MENU');
@@ -166,7 +229,8 @@ const App: React.FC = () => {
         isFinished: false,
         isLoading: false,
         error: null,
-        mode: 'PRACTICE'
+        mode: 'PRACTICE',
+        timeLeft: 0
     });
   };
 
@@ -197,26 +261,47 @@ const App: React.FC = () => {
         </div>
       )}
 
-      {/* Main Simulation Card */}
-      <div className="mb-10">
+      {/* Mode Selection Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-10">
+        {/* Full Mock */}
         <button
           onClick={() => handleStartQuiz(Subject.FULL_MOCK)}
-          className="w-full relative overflow-hidden bg-gradient-to-r from-purple-600 to-indigo-700 rounded-2xl p-8 text-white shadow-xl hover:shadow-2xl hover:scale-[1.01] transition-all duration-300 group text-left"
+          className="relative overflow-hidden bg-gradient-to-br from-purple-600 to-indigo-700 rounded-2xl p-6 text-white shadow-xl hover:shadow-2xl hover:scale-[1.01] transition-all duration-300 group text-left"
         >
           <div className="absolute top-0 right-0 -mt-10 -mr-10 w-40 h-40 bg-white opacity-10 rounded-full group-hover:scale-110 transition-transform"></div>
-          <div className="relative z-10 flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
-            <div>
+          <div className="relative z-10">
               <div className="flex items-center gap-3 mb-2">
-                 <span className="bg-yellow-400 text-yellow-900 text-xs font-bold px-2 py-1 rounded uppercase">แนะนำ</span>
-                 <h2 className="text-3xl font-bold">จำลองการสอบจริง (100 ข้อ)</h2>
+                 <span className="bg-white/20 text-white text-xs font-bold px-2 py-1 rounded uppercase backdrop-blur-sm">Classic</span>
+                 <h2 className="text-2xl font-bold">จำลองการสอบจริง</h2>
               </div>
-              <p className="text-purple-100 max-w-xl text-lg">
-                ทดสอบเสมือนจริงแบ่งตามสัดส่วนคะแนน: การคิดวิเคราะห์ (50), ภาษาอังกฤษ (25), และกฎหมาย (25)
+              <p className="text-purple-100 text-sm mb-4">
+                100 ข้อ (คิดวิเคราะห์, อังกฤษ, กฎหมาย) ไม่จำกัดเวลา เน้นการทำความเข้าใจ
               </p>
-            </div>
-            <div className="bg-white/20 p-3 rounded-full">
-              <svg className="w-10 h-10 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" /></svg>
-            </div>
+              <div className="flex items-center text-xs font-semibold bg-white/10 w-fit px-3 py-1 rounded-full">
+                 <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" /></svg>
+                 100 ข้อ
+              </div>
+          </div>
+        </button>
+
+        {/* Challenge Mode */}
+        <button
+          onClick={() => handleStartQuiz(Subject.CHALLENGE)}
+          className="relative overflow-hidden bg-gradient-to-br from-red-600 to-orange-600 rounded-2xl p-6 text-white shadow-xl hover:shadow-2xl hover:scale-[1.01] transition-all duration-300 group text-left"
+        >
+          <div className="absolute top-0 right-0 -mt-10 -mr-10 w-40 h-40 bg-white opacity-10 rounded-full group-hover:scale-110 transition-transform"></div>
+          <div className="relative z-10">
+              <div className="flex items-center gap-3 mb-2">
+                 <span className="bg-yellow-400 text-yellow-900 text-xs font-bold px-2 py-1 rounded uppercase shadow-sm">HARDCORE</span>
+                 <h2 className="text-2xl font-bold">Challenge Mode</h2>
+              </div>
+              <p className="text-red-100 text-sm mb-4">
+                เสมือนสอบจริง 100 ข้อ จับเวลา 3 ชั่วโมง! ทดสอบความเร็วและความแม่นยำ
+              </p>
+              <div className="flex items-center text-xs font-semibold bg-white/10 w-fit px-3 py-1 rounded-full">
+                 <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                 3 ชั่วโมง
+              </div>
           </div>
         </button>
       </div>
@@ -276,19 +361,51 @@ const App: React.FC = () => {
     const currentQ = quizState.questions[quizState.currentQuestionIndex];
     const isLastQ = quizState.currentQuestionIndex === quizState.questions.length - 1;
 
+    // Check if user is done (either finished via timer or manual finish which sets screen to result)
+    if (quizState.isFinished && screen === 'QUIZ') {
+         // This can happen if timer finishes while user is on quiz screen
+         // We should render result, but handleNextQuestion logic normally transitions screen.
+         // If timer triggered finish, we need to manually show result content or force transition in effect.
+         // For simplicity, let's render a "Times Up" message or force redirect.
+         // The useEffect above sets isFinished but doesn't change screen to RESULT directly to avoid render loops.
+         // Let's change screen here? No, render shouldn't cause side effects.
+         // Better: The useEffect should probably setScreen('RESULT') too? 
+         // Or we just display "Time's Up" overlay here.
+         return (
+             <div className="min-h-screen flex items-center justify-center bg-red-50">
+                 <div className="text-center p-8">
+                     <h2 className="text-3xl font-bold text-red-600 mb-4">หมดเวลา! (Time's Up)</h2>
+                     <p className="mb-6 text-gray-700">ระบบได้ส่งคำตอบของคุณเรียบร้อยแล้ว</p>
+                     <button onClick={() => setScreen('RESULT')} className="bg-primary-600 text-white px-6 py-3 rounded-lg font-bold">
+                         ดูผลสอบ
+                     </button>
+                 </div>
+             </div>
+         )
+    }
+
     return (
-      <div className="min-h-screen flex flex-col items-center py-8 px-4">
+      <div className="min-h-screen flex flex-col items-center py-8 px-4 relative">
         {/* Top Bar */}
         <div className="w-full max-w-3xl flex justify-between items-center mb-6">
             <button onClick={handleRestart} className="text-gray-500 hover:text-gray-800 flex items-center gap-1 text-sm font-medium">
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" /></svg>
-                ยกเลิกการสอบ
+                <span className="hidden sm:inline">ยกเลิก</span>
             </button>
-            <span className={`text-xs font-bold px-3 py-1 rounded-full uppercase tracking-wide
-              ${quizState.mode === 'FULL_EXAM' ? 'bg-purple-100 text-purple-800' : 'bg-primary-100 text-primary-800'}
-            `}>
-                {subject === Subject.FULL_MOCK ? 'FULL EXAM (100 ข้อ)' : subject}
-            </span>
+            
+            <div className="flex items-center gap-3">
+                 <span className={`text-xs font-bold px-3 py-1 rounded-full uppercase tracking-wide
+                  ${quizState.mode === 'CHALLENGE' ? 'bg-red-100 text-red-800' : 
+                    (quizState.mode === 'FULL_EXAM' ? 'bg-purple-100 text-purple-800' : 'bg-primary-100 text-primary-800')}
+                `}>
+                    {subject === Subject.FULL_MOCK ? 'FULL EXAM' : (subject === Subject.CHALLENGE ? 'CHALLENGE' : subject)}
+                </span>
+                
+                {/* Timer Display for Challenge Mode */}
+                {quizState.mode === 'CHALLENGE' && (
+                    <Timer timeLeft={quizState.timeLeft} />
+                )}
+            </div>
         </div>
 
         <QuizCard
@@ -297,20 +414,32 @@ const App: React.FC = () => {
           totalQuestions={quizState.questions.length}
           onAnswer={handleAnswer}
           selectedChoice={quizState.userAnswers[quizState.currentQuestionIndex]}
-          showResult={showCurrentResult}
+          showResult={showCurrentResult || quizState.mode !== 'PRACTICE'} // In Exam/Challenge, we show selection state but NOT correctness (unless we want to hide even selection?) Usually we show selection.
+          // Correction: In Exam/Challenge, we don't show result (Green/Red) immediately.
+          // QuizCard logic for "showResult" triggers the Green/Red styling.
+          // For Exam/Challenge, "showResult" should be false until the very end.
+          // However, QuizCard uses "showResult" to disable buttons too.
+          // We need to pass "showResult={false}" for Exam modes during the test.
         />
+        {/* Override showResult prop logic for QuizCard in App context:
+            In PRACTICE: showCurrentResult becomes true after answer.
+            In EXAM/CHALLENGE: showCurrentResult stays false until end (handled by separate screen).
+            Wait, QuizCard highlights the selected answer if !showResult and selectedChoice is set (blue border).
+            So passing showResult={false} works for Exam mode navigation.
+        */}
 
-        {showCurrentResult && (
-          <div className="w-full max-w-3xl mt-6 flex justify-end animate-fade-in-up">
-            <button
-              onClick={handleNextQuestion}
-              className="bg-primary-600 hover:bg-primary-700 text-white font-bold py-3 px-8 rounded-lg shadow-lg hover:shadow-xl transition-all transform hover:-translate-y-1 flex items-center gap-2"
-            >
-              {isLastQ ? 'ส่งคำตอบ & ดูผลสอบ' : 'ข้อต่อไป'}
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" /></svg>
-            </button>
-          </div>
-        )}
+        <div className="w-full max-w-3xl mt-6 flex justify-end">
+             {/* Next Button Logic */}
+             {(quizState.mode !== 'PRACTICE' || showCurrentResult) && (
+                <button
+                  onClick={handleNextQuestion}
+                  className="bg-primary-600 hover:bg-primary-700 text-white font-bold py-3 px-8 rounded-lg shadow-lg hover:shadow-xl transition-all transform hover:-translate-y-1 flex items-center gap-2"
+                >
+                  {isLastQ ? 'ส่งคำตอบ' : 'ข้อต่อไป'}
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" /></svg>
+                </button>
+             )}
+        </div>
       </div>
     );
   };
@@ -318,8 +447,6 @@ const App: React.FC = () => {
   const renderResult = () => {
     // Recalculate score logic for display
     let finalScore = 0;
-    
-    // Breakdown
     let analyticalScore = 0;
     let englishScore = 0;
     let lawScore = 0;
@@ -335,7 +462,7 @@ const App: React.FC = () => {
     });
     
     const percentage = (finalScore / quizState.questions.length) * 100;
-    const isPassed = percentage >= 60; // 60% passing criteria
+    const isPassed = percentage >= 60;
 
     return (
         <div className="min-h-screen flex items-center justify-center p-4 py-12">
@@ -357,6 +484,11 @@ const App: React.FC = () => {
                      <p className="text-gray-500">
                         {isPassed ? 'คะแนนรวมเกิน 60% คุณมีความพร้อมสูงมาก' : 'ต้องการอีกนิดเพื่อถึง 60% สู้ต่อไป!'}
                      </p>
+                     {quizState.mode === 'CHALLENGE' && (
+                       <div className="mt-2 text-sm text-red-500 font-semibold uppercase tracking-wider">
+                         Challenge Mode Completed
+                       </div>
+                     )}
                 </div>
 
                 <div className="bg-gray-50 rounded-xl p-6 mb-6">
@@ -366,8 +498,8 @@ const App: React.FC = () => {
                     </div>
                 </div>
 
-                {/* Breakdown for Full Exam */}
-                {quizState.mode === 'FULL_EXAM' && (
+                {/* Breakdown for Full Exam / Challenge */}
+                {(quizState.mode === 'FULL_EXAM' || quizState.mode === 'CHALLENGE') && (
                   <div className="bg-white border border-gray-200 rounded-lg p-4 mb-8 text-left">
                     <h3 className="font-bold text-gray-700 mb-3 border-b pb-2">คะแนนรายวิชา</h3>
                     <div className="space-y-2 text-sm">
