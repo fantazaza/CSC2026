@@ -45,4 +45,4 @@ export interface ScoreRecord {
   };
 }
 
-export type GameScreen = 'MENU' | 'QUIZ' | 'RESULT' | 'SCOREBOARD';
+export type GameScreen = 'MENU' | 'QUIZ' | 'RESULT' | 'SCOREBOARD' | 'DETAILED_SOLUTION';

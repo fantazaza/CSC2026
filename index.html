@@ -37,6 +37,21 @@
         font-family: 'Sarabun', sans-serif;
         background-color: #f8fafc;
       }
+      @media print {
+        body {
+          -webkit-print-color-adjust: exact;
+          print-color-adjust: exact;
+          background-color: white;
+        }
+        @page {
+          size: auto;
+          margin: 15mm;
+        }
+        /* Hide scrollbars in print */
+        ::-webkit-scrollbar {
+            display: none;
+        }
+      }
     </style>
   <script type="importmap">
 {

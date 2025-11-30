@@ -10,6 +10,7 @@ interface QuizCardProps {
   showResult: boolean;
   isPinned: boolean;
   onTogglePin: () => void;
+  onPrevious?: () => void;
 }
 
 const QuizCard: React.FC<QuizCardProps> = ({
@@ -20,7 +21,8 @@ const QuizCard: React.FC<QuizCardProps> = ({
   selectedChoice,
   showResult,
   isPinned,
-  onTogglePin
+  onTogglePin,
+  onPrevious
 }) => {
   const [showExplanation, setShowExplanation] = useState(false);
 
@@ -53,9 +55,20 @@ const QuizCard: React.FC<QuizCardProps> = ({
     <div className="w-full max-w-3xl mx-auto bg-white rounded-2xl shadow-xl overflow-hidden border border-gray-100 relative">
       {/* Header / Progress */}
       <div className="bg-gray-50 px-6 py-4 border-b border-gray-100 flex justify-between items-center">
-        <span className="text-sm font-semibold text-gray-500 uppercase tracking-wider">
-          คำถามที่ {questionNumber} / {totalQuestions}
-        </span>
+        <div className="flex items-center gap-3">
+          {onPrevious && (
+            <button
+              onClick={onPrevious}
+              className="p-1 rounded-full hover:bg-gray-200 text-gray-500 transition-colors"
+              title="ข้อก่อนหน้า"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
+            </button>
+          )}
+          <span className="text-sm font-semibold text-gray-500 uppercase tracking-wider">
+            คำถามที่ {questionNumber} / {totalQuestions}
+          </span>
+        </div>
         
         {/* Pin Button */}
         <button 

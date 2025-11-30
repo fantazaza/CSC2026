@@ -123,7 +123,8 @@ export const generateQuizQuestions = async (subject: Subject, count: number = 5)
       correctAnswerIndex: q.correctAnswerIndex,
       explanation: q.explanation,
       category: subject,
-      svg: q.svg || undefined
+      // Fix: Strictly check for null string and empty values
+      svg: (q.svg && q.svg !== 'null' && q.svg.trim() !== '') ? q.svg : undefined
     }));
 
     // Enforce strict count limit

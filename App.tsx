@@ -189,7 +189,14 @@ const App: React.FC = () => {
       currentQuestionIndex: index,
       isReviewing: false
     }));
-    setShowCurrentResult(false); // Reset result view if moving around in Practice (though practice usually reveals instantly)
+    
+    // Restore result view state for Practice mode
+    if (quizState.mode === 'PRACTICE') {
+        const isAnswered = quizState.userAnswers[index] !== undefined;
+        setShowCurrentResult(isAnswered);
+    } else {
+        setShowCurrentResult(false);
+    }
   };
 
   const submitExam = useCallback(() => {
@@ -218,37 +225,61 @@ const App: React.FC = () => {
       const isLastQuestion = prev.currentQuestionIndex === prev.questions.length - 1;
       
       if (isLastQuestion) {
-        // If Practice Mode, just finish.
-        if (prev.mode === 'PRACTICE') {
-             // For practice, we can just finish immediately as usual
-             // But to be consistent with user request "When last question, show review", let's apply review for all modes or just Exam?
-             // User said "Make it 100 questions... Show review at the end". Usually for Practice (5 items) it's annoying.
-             // Let's enable review only if items > 5 or specific request. 
-             // But the request implies the pin/skip feature is general. Let's do it for all.
-             return { ...prev, isReviewing: true };
-        }
+         return { ...prev, isReviewing: true };
+      }
 
-        // For Full Exam / Challenge, show review screen before submitting
-        return {
-          ...prev,
-          isReviewing: true,
-        };
+      const nextIndex = prev.currentQuestionIndex + 1;
+      
+      // Update showCurrentResult for the next question (relevant for Practice mode navigation)
+      if (prev.mode === 'PRACTICE') {
+          // If already answered, show result. If not, hide.
+          const isAnswered = prev.userAnswers[nextIndex] !== undefined;
+          setShowCurrentResult(isAnswered);
+      } else {
+          setShowCurrentResult(false);
       }
 
       return {
         ...prev,
-        currentQuestionIndex: prev.currentQuestionIndex + 1,
+        currentQuestionIndex: nextIndex,
       };
     });
-    
-    if (quizState.mode === 'PRACTICE') {
-       if (quizState.currentQuestionIndex < quizState.questions.length - 1) {
-          setShowCurrentResult(false);
-       }
-    } 
-  }, [quizState.questions, quizState.currentQuestionIndex, quizState.mode]);
+  }, [quizState.questions]);
+
+  const handlePreviousQuestion = useCallback(() => {
+    setQuizState(prev => {
+        const prevIndex = prev.currentQuestionIndex - 1;
+        if (prevIndex < 0) return prev;
+
+        // Update showCurrentResult for the previous question
+        if (prev.mode === 'PRACTICE') {
+            const isAnswered = prev.userAnswers[prevIndex] !== undefined;
+            setShowCurrentResult(isAnswered);
+        } else {
+            setShowCurrentResult(false);
+        }
+
+        return {
+            ...prev,
+            currentQuestionIndex: prevIndex
+        };
+    });
+  }, []);
 
   const handleRestart = () => {
+    // Confirm before quitting if in the middle of a quiz. 
+    // Skip confirmation if:
+    // 1. currently loading (user aborting generation)
+    // 2. already finished
+    // 3. currently on the FIRST question (acts as simple back button)
+    const isFirstQuestion = quizState.currentQuestionIndex === 0;
+
+    if (screen === 'QUIZ' && !quizState.isFinished && !quizState.isLoading && !isFirstQuestion) {
+      if (!window.confirm('คุณต้องการยกเลิกการสอบใช่หรือไม่? ข้อมูลการสอบปัจจุบันจะหายไป')) {
+        return;
+      }
+    }
+
     setScreen('MENU');
     setSubject(null);
     setQuizState({
@@ -375,7 +406,16 @@ const App: React.FC = () => {
   const renderReviewScreen = () => {
     return (
       <div className="min-h-screen bg-slate-50 flex flex-col items-center py-8 px-4">
-         <div className="max-w-4xl w-full bg-white rounded-2xl shadow-xl p-8">
+         <div className="max-w-4xl w-full bg-white rounded-2xl shadow-xl p-8 relative">
+            {/* Close / Cancel Button for Review Screen */}
+            <button 
+                onClick={handleRestart} 
+                className="absolute top-6 right-6 text-gray-400 hover:text-red-500 transition-colors p-2"
+                title="ยกเลิกการสอบ"
+            >
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+            </button>
+
             <h2 className="text-2xl font-bold text-gray-800 mb-6 text-center">ตรวจสอบคำตอบ (Review)</h2>
             
             <div className="flex flex-wrap justify-center gap-4 mb-8 text-sm">
@@ -425,11 +465,118 @@ const App: React.FC = () => {
     );
   };
 
+  const renderDetailedSolution = () => {
+    return (
+      <div className="min-h-screen bg-white p-6 md:p-12 print:p-0">
+         <div className="max-w-4xl mx-auto">
+            {/* Header */}
+            <div className="flex justify-between items-start border-b-2 border-gray-200 pb-6 mb-8 print:mb-4">
+               <div>
+                  <h1 className="text-3xl font-bold text-gray-900 mb-2">เฉลยข้อสอบ: {subject || quizState.mode}</h1>
+                  <p className="text-gray-600 text-lg">
+                    คะแนนที่ได้: <span className="font-bold text-primary-600">{quizState.score}</span> / {quizState.questions.length}
+                    {' '}({Math.round((quizState.score / quizState.questions.length) * 100)}%)
+                  </p>
+                  <p className="text-sm text-gray-400 mt-1 print:hidden">
+                    คลิกปุ่ม "บันทึก PDF" ด้านขวาเพื่อพิมพ์หรือบันทึกไฟล์
+                  </p>
+               </div>
+               <div className="flex gap-3 print:hidden">
+                  <button 
+                     onClick={() => window.print()}
+                     className="flex items-center gap-2 bg-gray-800 hover:bg-gray-900 text-white px-5 py-2.5 rounded-lg font-medium transition-colors shadow-lg"
+                  >
+                     <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                     บันทึก PDF
+                  </button>
+                  <button 
+                     onClick={() => setScreen('RESULT')}
+                     className="px-5 py-2.5 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 font-medium"
+                  >
+                     กลับ
+                  </button>
+               </div>
+            </div>
+
+            {/* Questions List */}
+            <div className="space-y-10">
+               {quizState.questions.map((q, index) => {
+                  const userAnswer = quizState.userAnswers[index];
+                  const isCorrect = userAnswer === q.correctAnswerIndex;
+                  const isSkipped = userAnswer === undefined;
+
+                  return (
+                     <div key={q.id} className="break-inside-avoid border-b border-gray-100 pb-8 last:border-0">
+                        <div className="flex gap-4">
+                           <div className="shrink-0 w-8 h-8 flex items-center justify-center bg-gray-100 rounded-full font-bold text-sm text-gray-600">
+                              {index + 1}
+                           </div>
+                           <div className="flex-1">
+                              {/* Text & SVG */}
+                              <h3 className="text-lg font-semibold text-gray-900 mb-4 leading-relaxed">{q.text}</h3>
+                              {q.svg && (
+                                <div className="mb-6 flex justify-start">
+                                    <div 
+                                    className="bg-white border border-gray-200 rounded-lg p-4 max-w-sm"
+                                    dangerouslySetInnerHTML={{ __html: q.svg }} 
+                                    />
+                                </div>
+                              )}
+                              
+                              {/* Choices */}
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
+                                 {q.choices.map((choice, cIndex) => {
+                                    const isThisCorrect = cIndex === q.correctAnswerIndex;
+                                    const isThisSelected = cIndex === userAnswer;
+                                    
+                                    let style = "border-gray-200 bg-white text-gray-600";
+                                    if (isThisCorrect) style = "border-green-500 bg-green-50 text-green-900 font-medium ring-1 ring-green-500";
+                                    else if (isThisSelected && !isThisCorrect) style = "border-red-500 bg-red-50 text-red-900 font-medium";
+
+                                    return (
+                                       <div key={cIndex} className={`p-3 rounded-lg border flex items-start text-sm ${style}`}>
+                                          <span className="mr-2 font-bold">{['ก','ข','ค','ง'][cIndex]}.</span>
+                                          <span>{choice}</span>
+                                          {isThisCorrect && <svg className="w-5 h-5 ml-auto text-green-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>}
+                                          {isThisSelected && !isThisCorrect && <svg className="w-5 h-5 ml-auto text-red-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>}
+                                       </div>
+                                    )
+                                 })}
+                              </div>
+
+                              {/* Explanation */}
+                              <div className="bg-blue-50 p-4 rounded-lg border border-blue-100 text-sm leading-relaxed text-blue-900">
+                                 <span className="font-bold text-blue-700 block mb-1">คำอธิบาย:</span>
+                                 {q.explanation}
+                              </div>
+                           </div>
+                        </div>
+                     </div>
+                  )
+               })}
+            </div>
+            
+            {/* Footer for PDF */}
+            <div className="hidden print:block text-center text-xs text-gray-400 mt-8 pt-8 border-t">
+               สร้างโดย GorPor Tutor 69 - Powered by Gemini AI
+            </div>
+         </div>
+      </div>
+    );
+  };
+
   const renderQuiz = () => {
     if (quizState.isLoading) {
       return (
-        <div className="min-h-screen flex items-center justify-center">
+        <div className="min-h-screen flex flex-col items-center justify-center gap-6 bg-slate-50">
           <LoadingSpinner />
+          {/* Cancel Button during Loading */}
+          <button 
+            onClick={handleRestart}
+            className="px-6 py-2 rounded-full border border-red-200 text-red-600 hover:bg-red-50 hover:border-red-300 transition-colors text-sm font-medium"
+          >
+            ยกเลิก / Cancel
+          </button>
         </div>
       );
     }
@@ -471,9 +618,12 @@ const App: React.FC = () => {
       <div className="min-h-screen flex flex-col items-center py-8 px-4 relative">
         {/* Top Bar */}
         <div className="w-full max-w-3xl flex justify-between items-center mb-6">
-            <button onClick={handleRestart} className="text-gray-500 hover:text-gray-800 flex items-center gap-1 text-sm font-medium">
+            <button 
+              onClick={quizState.currentQuestionIndex === 0 ? handleRestart : handlePreviousQuestion} 
+              className="text-gray-500 hover:text-gray-800 flex items-center gap-1 text-sm font-medium"
+            >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" /></svg>
-                <span className="hidden sm:inline">ยกเลิก</span>
+                <span className="hidden sm:inline">{quizState.currentQuestionIndex === 0 ? 'ยกเลิก' : 'ข้อก่อนหน้า'}</span>
             </button>
             
             <div className="flex items-center gap-3">
@@ -488,6 +638,13 @@ const App: React.FC = () => {
                 {quizState.mode === 'CHALLENGE' && (
                     <Timer timeLeft={quizState.timeLeft} />
                 )}
+
+                {/* Explicit Cancel Button for Q2+ */}
+                {quizState.currentQuestionIndex > 0 && (
+                   <button onClick={handleRestart} className="text-gray-400 hover:text-red-500 p-1" title="ยกเลิกการสอบ">
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                   </button>
+                )}
             </div>
         </div>
 
@@ -500,6 +657,7 @@ const App: React.FC = () => {
           showResult={showCurrentResult}
           isPinned={quizState.pinnedIndices.includes(quizState.currentQuestionIndex)}
           onTogglePin={handleTogglePin}
+          onPrevious={quizState.currentQuestionIndex > 0 ? handlePreviousQuestion : undefined}
         />
 
         <div className="w-full max-w-3xl mt-6 flex justify-between items-center">
@@ -514,25 +672,34 @@ const App: React.FC = () => {
 
              {/* Navigation */}
              <div className="flex gap-3">
-                 {/* Show Review Button if not in Practice or if we want to allow jumping */}
-                 {quizState.mode !== 'PRACTICE' && (
-                    <button 
-                        onClick={() => setQuizState(prev => ({...prev, isReviewing: true}))}
-                        className="px-4 py-3 text-gray-600 hover:text-primary-600 font-medium text-sm"
-                    >
-                        ดูภาพรวม
-                    </button>
-                 )}
+                 {/* Previous Button - For easier access */}
+                 <button
+                    onClick={handlePreviousQuestion}
+                    disabled={quizState.currentQuestionIndex === 0}
+                    className={`px-4 py-3 font-medium text-sm rounded-lg transition-colors flex items-center gap-2
+                      ${quizState.currentQuestionIndex === 0 
+                        ? 'text-gray-300 cursor-not-allowed' 
+                        : 'text-gray-600 hover:bg-gray-200 hover:text-gray-800 bg-white border border-gray-200'
+                      }`}
+                 >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
+                    <span className="hidden sm:inline">ก่อนหน้า</span>
+                 </button>
 
-                 {(quizState.mode !== 'PRACTICE' || showCurrentResult) && (
-                    <button
+                 <button 
+                    onClick={() => setQuizState(prev => ({...prev, isReviewing: true}))}
+                    className="px-4 py-3 text-gray-600 hover:text-primary-600 font-medium text-sm"
+                 >
+                    ดูภาพรวม
+                 </button>
+
+                 <button
                     onClick={handleNextQuestion}
                     className="bg-primary-600 hover:bg-primary-700 text-white font-bold py-3 px-8 rounded-lg shadow-lg hover:shadow-xl transition-all transform hover:-translate-y-1 flex items-center gap-2"
-                    >
+                 >
                     {isLastQ ? 'ตรวจสอบและส่ง' : 'ข้อต่อไป'}
                     <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" /></svg>
-                    </button>
-                 )}
+                 </button>
              </div>
         </div>
       </div>
@@ -616,17 +783,26 @@ const App: React.FC = () => {
 
                 <div className="flex flex-col gap-3">
                      <button 
-                        onClick={() => setScreen('SCOREBOARD')}
-                        className="w-full py-3 bg-yellow-500 hover:bg-yellow-600 text-white rounded-lg font-semibold transition-colors shadow-sm"
-                    >
-                        ดู Scoreboard
-                    </button>
-                    <button 
-                        onClick={() => handleStartQuiz(subject!)}
-                        className="w-full py-3 bg-primary-600 hover:bg-primary-700 text-white rounded-lg font-semibold transition-colors shadow-lg shadow-primary-500/30"
-                    >
-                        สอบใหม่อีกครั้ง
-                    </button>
+                        onClick={() => setScreen('DETAILED_SOLUTION')}
+                        className="w-full py-3 bg-gray-800 hover:bg-gray-900 text-white rounded-lg font-semibold transition-colors shadow-lg flex items-center justify-center gap-2"
+                     >
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                        ดูเฉลยละเอียด / บันทึก PDF
+                     </button>
+                     <div className="grid grid-cols-2 gap-3">
+                         <button 
+                            onClick={() => setScreen('SCOREBOARD')}
+                            className="w-full py-3 bg-yellow-500 hover:bg-yellow-600 text-white rounded-lg font-semibold transition-colors shadow-sm"
+                        >
+                            ดู Scoreboard
+                        </button>
+                        <button 
+                            onClick={() => handleStartQuiz(subject!)}
+                            className="w-full py-3 bg-primary-600 hover:bg-primary-700 text-white rounded-lg font-semibold transition-colors shadow-lg shadow-primary-500/30"
+                        >
+                            สอบใหม่อีกครั้ง
+                        </button>
+                     </div>
                     <button 
                         onClick={handleRestart}
                         className="w-full py-3 bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 rounded-lg font-semibold transition-colors"
@@ -645,6 +821,7 @@ const App: React.FC = () => {
         {screen === 'QUIZ' && renderQuiz()}
         {screen === 'RESULT' && renderResult()}
         {screen === 'SCOREBOARD' && <Scoreboard onBack={() => setScreen('MENU')} />}
+        {screen === 'DETAILED_SOLUTION' && renderDetailedSolution()}
     </div>
   );
 };
