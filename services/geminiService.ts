@@ -71,15 +71,8 @@ const getSubjectGuidelines = (subject: Subject): string => {
   }
 };
 
-export const generateQuizQuestions = async (subject: Subject, count: number = 5): Promise<Question[]> => {
-  try {
-    const apiKey = process.env.API_KEY;
-    if (!apiKey) {
-      throw new Error("API Key is missing. Please check your environment configuration.");
-    }
-
-    const ai = new GoogleGenAI({ apiKey });
-    
+// Internal helper to fetch a small batch of questions
+const fetchBatch = async (subject: Subject, count: number, ai: GoogleGenAI): Promise<Question[]> => {
     const prompt = `
       You are an expert tutor for the Thailand OCSC (Gor Por) Exam (Year 2569).
       Create EXACTLY ${count} multiple-choice questions for the subject: "${subject}".
@@ -104,7 +97,7 @@ export const generateQuizQuestions = async (subject: Subject, count: number = 5)
       config: {
         responseMimeType: "application/json",
         responseSchema: questionSchema,
-        thinkingConfig: { thinkingBudget: 2048 },
+        thinkingConfig: { thinkingBudget: 1024 }, // Reduced slightly for stability/speed
       },
     });
 
@@ -115,40 +108,70 @@ export const generateQuizQuestions = async (subject: Subject, count: number = 5)
 
     const parsedData = JSON.parse(jsonText);
     
-    // Transform to our internal type and add IDs
-    let questions = parsedData.questions.map((q: any, index: number) => ({
-      id: `q-${Date.now()}-${subject}-${index}`,
+    // Transform and sanitize
+    return parsedData.questions.map((q: any, index: number) => ({
+      id: `q-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
       text: q.text,
       choices: q.choices,
       correctAnswerIndex: q.correctAnswerIndex,
       explanation: q.explanation,
       category: subject,
-      // Fix: Strictly check for null string and empty values
       svg: (q.svg && q.svg !== 'null' && q.svg.trim() !== '') ? q.svg : undefined
     }));
+};
 
-    // Enforce strict count limit
-    if (questions.length > count) {
-      questions = questions.slice(0, count);
-    }
+const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
-    return questions;
-
-  } catch (error) {
-    console.error(`Error generating quiz for ${subject}:`, error);
-    throw error;
+export const generateQuizQuestions = async (subject: Subject, count: number = 5): Promise<Question[]> => {
+  const apiKey = process.env.API_KEY;
+  if (!apiKey) {
+    throw new Error("API Key is missing. Please check your environment configuration.");
   }
+  const ai = new GoogleGenAI({ apiKey });
+
+  const BATCH_SIZE = 5; // Fetch in small chunks to avoid timeout/payload errors
+  const questions: Question[] = [];
+  const totalBatches = Math.ceil(count / BATCH_SIZE);
+
+  for (let i = 0; i < totalBatches; i++) {
+    const remaining = count - questions.length;
+    const currentBatchSize = Math.min(remaining, BATCH_SIZE);
+    
+    let attempts = 0;
+    let success = false;
+
+    // Retry mechanism
+    while (attempts < 3 && !success) {
+      try {
+        const batch = await fetchBatch(subject, currentBatchSize, ai);
+        questions.push(...batch);
+        success = true;
+      } catch (error) {
+        console.warn(`Batch ${i + 1}/${totalBatches} for ${subject} failed (Attempt ${attempts + 1}). Retrying...`, error);
+        attempts++;
+        if (attempts >= 3) {
+            // If we have some questions, maybe we can proceed, but for strictness let's throw
+            // or we could just break and return partial results.
+            // Let's throw to ensure the user gets what they asked for, or a clear error.
+             console.error(`Failed to fetch batch after 3 attempts.`);
+             throw error;
+        }
+        await delay(1500 * attempts); // Exponential backoff-ish
+      }
+    }
+    
+    // Small delay between batches to be gentle on the API
+    if (i < totalBatches - 1) await delay(500);
+  }
+
+  // Ensure we return exactly the requested amount
+  return questions.slice(0, count);
 };
 
 export const generateFullExam = async (): Promise<Question[]> => {
-  // According to user request:
-  // 1. Analytical Thinking (50 items) -> We split this into 25 Math/Logic (General) + 25 Thai
-  // 2. English (25 items)
-  // 3. Law (25 items)
-  // Total 100 items.
-
   try {
-    // Run requests in parallel to speed up generation
+    // Run subjects in parallel, but inside each subject, requests are sequential (batched).
+    // This creates 4 concurrent streams, which is safe for browsers (limit is usually 6).
     const [mathQuestions, thaiQuestions, englishQuestions, lawQuestions] = await Promise.all([
       generateQuizQuestions(Subject.GENERAL, 25),
       generateQuizQuestions(Subject.THAI, 25),
@@ -156,7 +179,6 @@ export const generateFullExam = async (): Promise<Question[]> => {
       generateQuizQuestions(Subject.LAW, 25)
     ]);
 
-    // Combine all questions
     return [
       ...mathQuestions,
       ...thaiQuestions,
